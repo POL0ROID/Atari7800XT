@@ -1,0 +1,132 @@
+package debugger
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/jetsetilly/test7800/hardware/cpu/instructions"
+)
+
+func (m *debugger) parseStepRule(cmd []string) bool {
+	rule := strings.ToUpper(cmd[0])
+
+	switch rule {
+	case "BRANCH", "FAIL":
+		if m.console.MC.LastResult.Defn == nil {
+			fmt.Println(m.styles.err.Render("no instructions executed since reset"))
+			return false
+		}
+
+		if !m.console.MC.LastResult.Defn.IsBranch() {
+			fmt.Println(m.styles.err.Render("last instruction was not a branch"))
+			return false
+		}
+
+		a := m.console.MC.LastResult.Address
+		a += uint16(m.console.MC.LastResult.ByteCount)
+		m.stepRule = func() bool {
+			return m.console.MC.LastResult.Address == a
+		}
+
+	case "FRAME", "FR":
+		var tgt int
+		if len(cmd) > 1 {
+			var err error
+			tgt, err = strconv.Atoi(cmd[1])
+			if err != nil {
+				fmt.Println(m.styles.err.Render(err.Error()))
+				return false
+			}
+			if tgt <= m.console.MARIA.Coords.Frame {
+				fmt.Println(m.styles.err.Render(fmt.Sprintf("FRAME %d is in the past", tgt)))
+				return false
+			}
+		} else {
+			tgt = m.console.MARIA.Coords.Frame + 1
+		}
+		m.stepRule = func() bool {
+			return m.console.MARIA.Coords.Frame == tgt
+		}
+
+	case "SCANLINE", "SL":
+		var sl int
+		if len(cmd) > 1 {
+			var err error
+			sl, err = strconv.Atoi(cmd[1])
+			if err != nil {
+				fmt.Println(m.styles.err.Render(err.Error()))
+				return false
+			}
+		} else {
+			sl = m.console.MARIA.Coords.Scanline + 1
+			if sl >= m.console.MARIA.Spec.AbsoluteBottom {
+				sl -= m.console.MARIA.Spec.AbsoluteBottom
+			}
+		}
+		if m.console.MARIA.Coords.Scanline == sl {
+			fr := m.console.MARIA.Coords.Frame
+			m.stepRule = func() bool {
+				return m.console.MARIA.Coords.Scanline == sl && m.console.MARIA.Coords.Frame == fr+1
+			}
+		} else {
+			m.stepRule = func() bool {
+				return m.console.MARIA.Coords.Scanline == sl
+			}
+		}
+
+	case "INTERRUPT", "INTR":
+		// steps to the next instruction which is inside an
+		// interrupt. if consecutive instructions are in an
+		// interrupt then this is effectively the same as step
+		m.stepRule = func() bool {
+			return m.console.MC.LastResult.FromInterrupt
+		}
+
+	case "DLL":
+		id := m.console.MARIA.DLL.ID()
+		m.stepRule = func() bool {
+			if id != m.console.MARIA.DLL.ID() {
+				fmt.Println(m.styles.mem.Render(
+					m.console.MARIA.DLL.Status(),
+				))
+				return true
+			}
+			return false
+		}
+
+	case "DL":
+		id := m.console.MARIA.DL.ID()
+		m.stepRule = func() bool {
+			if id != m.console.MARIA.DL.ID() {
+				fmt.Println(m.styles.mem.Render(
+					m.console.MARIA.DL.Status(),
+				))
+				return true
+			}
+			return false
+		}
+
+	default:
+		// check if rule is in a CPU operator
+		var found bool
+		for _, d := range instructions.Definitions {
+			if rule == strings.ToUpper(d.Operator.String()) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			fmt.Println(m.styles.err.Render(
+				fmt.Sprintf("STEP %s is unsupported", rule),
+			))
+			return false
+		}
+		m.stepRule = func() bool {
+			op := strings.ToUpper(m.console.MC.LastResult.Defn.Operator.String())
+			return op == rule
+		}
+	}
+
+	return true
+}

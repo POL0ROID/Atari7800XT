@@ -1,0 +1,156 @@
+// This file is part of Gopher2600.
+//
+// Gopher2600 is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Gopher2600 is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Gopher2600.  If not, see <https://www.gnu.org/licenses/>.
+
+package pokey
+
+import (
+	"fmt"
+	"strings"
+)
+
+type Context interface {
+	Break(e error)
+}
+
+// Pokey is the implementation of the TIA audio sub-system
+type Pokey struct {
+	ctx Context
+
+	// the placement of POKEY in the address space
+	origin uint16
+
+	// the volume is sampled every colour clock and the volume at each clock is
+	// summed. at fixed points, the volume is averaged
+	sampleSum   [4]int
+	sampleSumCt int
+
+	// "There are four semi-independent audio channels, each with its own frequency,
+	// noise and volume control. Each channel has an eight-bit "divide-by-N"
+	// frequency divider and an eight-bit control register, which selects the noise
+	// (polynomial counter) content and volume. "
+	channel [4]channel
+
+	// noise generating polynomials
+	noise polynomials
+
+	// the counter that keeps count of the 15Khz and 64Khz clock
+	ct15Khz int
+	ct64Khz int
+
+	// use the 15Khz clock instead of the 64Khz clock. this is approximately a division of 4
+	// 63.9210 / 15.6999 = 4.0714. set via the AUDCTL register
+	prefer15Khz bool
+
+	// the pokey is in the initState until SKCTL is written to
+	initState bool
+
+	// keeps track of which channel last toggled the serial output. only used during two-tone mode
+	serialOutput int
+}
+
+// NewAudio is the preferred method of initialisation for the Audio sub-system.
+func NewAudio(ctx Context, origin uint16) (*Pokey, error) {
+	if origin != 0x4000 && origin != 0x450 && origin != 0x440 && origin != 0x800 {
+		return nil, fmt.Errorf("pokey: %04x is not a normal origin address", origin)
+	}
+
+	pk := &Pokey{
+		ctx:       ctx,
+		origin:    origin,
+		initState: true,
+	}
+	pk.noise.initialise()
+
+	for i := range pk.channel {
+		pk.channel[i].noise = &pk.noise
+		pk.channel[i].num = i
+		pk.channel[i].serialOutput = &pk.serialOutput
+	}
+	pk.channel[0].filter = 0x01
+	pk.channel[1].filter = 0x01
+
+	return pk, nil
+}
+
+func (pk *Pokey) Label() string {
+	return fmt.Sprintf("POKEY @ %#04x", pk.origin)
+}
+
+// Snapshot creates a copy of the TIA Audio sub-system in its current state.
+func (pk *Pokey) Snapshot() *Pokey {
+	n := *pk
+	return &n
+}
+
+func (pk *Pokey) String() string {
+	s := strings.Builder{}
+	for i := range pk.channel {
+		fmt.Fprintf(&s, "ch%d: %s", i, pk.channel[i].String())
+	}
+	return s.String()
+}
+
+func (pk *Pokey) Step() {
+	// from 'Atari POKEY', sheet 4:
+	//
+	// "there are three polynomial counters used to generate random noise [...] These counters
+	// are clocked by 1.79Mhz"
+	//
+	// this means that the counters are stepped even when 15Khz is selected. they are always ticked
+	// at 1.79.Mhz
+	pk.noise.step()
+
+	pk.ct15Khz++
+	if pk.ct15Khz >= 114 {
+		pk.ct15Khz = 0
+	}
+
+	pk.ct64Khz++
+	if pk.ct64Khz >= 28 {
+		pk.ct64Khz = 0
+	}
+
+	clk15Khz := pk.ct15Khz == 0 && pk.prefer15Khz
+	clk64Khz := pk.ct64Khz == 0 && !pk.prefer15Khz
+	clk := clk15Khz || clk64Khz
+
+	pk.channel[0].step(clk)
+	pk.channel[1].step(clk)
+	pk.channel[2].step(clk)
+	pk.channel[3].step(clk)
+
+	pk.sampleSum[0] += int(pk.channel[0].actualVolume())
+	pk.sampleSum[1] += int(pk.channel[1].actualVolume())
+	pk.sampleSum[2] += int(pk.channel[2].actualVolume())
+	pk.sampleSum[3] += int(pk.channel[3].actualVolume())
+
+	pk.sampleSumCt++
+}
+
+// Volume iterates the current volume levels for each channel
+func (pk *Pokey) Volume(yield func(int16)) {
+	if pk.sampleSumCt == 0 || pk.initState {
+		for range 4 {
+			yield(0)
+		}
+		return
+	}
+	for i := range pk.sampleSum {
+		v := int16(pk.sampleSum[i] / pk.sampleSumCt)
+		pk.sampleSum[i] = 0
+		yield(v << 8)
+	}
+	pk.sampleSumCt = 0
+}

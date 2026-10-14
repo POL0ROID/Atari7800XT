@@ -1,0 +1,55 @@
+package elf_test
+
+import (
+	"bytes"
+	_ "embed"
+	"testing"
+
+	"github.com/jetsetilly/test7800/hardware/memory/external/elf"
+	"github.com/jetsetilly/test7800/hardware/spec"
+	"github.com/jetsetilly/test7800/logger"
+	"github.com/jetsetilly/test7800/test"
+)
+
+//go:embed "test_data/7800backgroundcolors.bin"
+var testfile []byte
+
+//go:embed "test_data/7800backgroundcolors.log"
+var testfile_log []byte
+
+type Context struct {
+}
+
+func (c *Context) Rand8Bit() uint8 {
+	return 0
+}
+
+func (c *Context) Break(_ error) {
+}
+
+func (c *Context) Spec() spec.Spec {
+	return spec.NTSC
+}
+
+func (c *Context) IsAtari7800() bool {
+	return true
+}
+
+func TestELF(t *testing.T) {
+	e, err := elf.NewElf(&Context{}, testfile)
+	test.ExpectSuccess(t, err)
+	test.ExpectInequality(t, e, nil)
+
+	// there should be a .text section
+	s, _ := e.Section(".text")
+	test.ExpectSuccess(t, s != nil)
+
+	// there is no section named .foo
+	s, _ = e.Section(".foo")
+	test.ExpectFailure(t, s != nil)
+
+	// logging output
+	b := &bytes.Buffer{}
+	logger.Tail(b, -1)
+	test.ExpectEquality(t, b.String(), string(testfile_log))
+}
