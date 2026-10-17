@@ -114,6 +114,12 @@ type Maria struct {
 	// of the scanline as soon as DMA starts we store the signal until DMA has actually
 	// finished
 	dli bool
+
+	// EXPERIMENTAL: Pending register latch for interrupting mid-scanline bg changes,
+	// and bool set by debugger.go representing if the flag is being used
+    pendingBgDli  uint8
+    hasPendingBgDli bool
+    Karateka bool
 }
 
 type Memory interface {
@@ -151,6 +157,8 @@ func (mar *Maria) Reset(random bool) {
 	}
 
 	mar.bg = 0
+	mar.pendingBgDli = 0
+	mar.hasPendingBgDli = false
 	mar.wsync = false
 	mar.dpph = 0
 	mar.dppl = 0
@@ -314,9 +322,16 @@ func (mar *Maria) Read(idx uint16) (uint8, error) {
 }
 
 func (mar *Maria) Write(idx uint16, data uint8) error {
+	inActiveScanline := mar.Coords.Clk >= spec.ClksHBLANK && mar.mstat == vblankDisable
 	switch idx {
 	case 0x020:
-		mar.bg = data
+	    if inActiveScanline && mar.Karateka {
+		        mar.pendingBgDli = data
+				mar.hasPendingBgDli = true
+		} else {
+				mar.bg = data
+				mar.hasPendingBgDli = false // probably unnecessary
+		}
 	case 0x021:
 		mar.palette[0][0] = data
 	case 0x022:
@@ -504,6 +519,11 @@ func (mar *Maria) Tick(dmaLatch bool) (dma bool, rdy bool, nmi bool) {
 
 		mar.lineram.newScanline()
 		mar.RecentDL = mar.RecentDL[:0]
+
+		if mar.hasPendingBgDli {
+			mar.bg = mar.pendingBgDli
+			mar.hasPendingBgDli = false
+		}
 
 		if mar.Coords.Scanline >= mar.Spec.AbsoluteBottom {
 			mar.Coords.Scanline = 0

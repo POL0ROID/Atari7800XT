@@ -503,6 +503,8 @@ func Launch(endDebugger <-chan bool, g *gui.ChannelsDebugger, args []string) err
 		players    string
 		useDialog  bool
 		pokeyChip  string
+		// EXPERIMENTAL: adding toggle for Karateka fix
+		karateka   bool
 	)
 
 	specOptions := []string{"AUTO", "NTSC", "PAL"}
@@ -545,6 +547,8 @@ func Launch(endDebugger <-chan bool, g *gui.ChannelsDebugger, args []string) err
 	flgs.StringVar(&players, "players", "", "comma separated list of hardware controllers for up to four players")
 	flgs.BoolVar(&useDialog, "dialog", true, "present user with file dialogue on startup if no file is specified")
 	flgs.StringVar(&pokeyChip, "pokey", "", "force use of optional pokey in cartridge. 'none' will remove an auto added chip")
+	// EXPERIMENTAL
+	flgs.BoolVar(&karateka, "karateka", false, "enable karateka fix, which delays background color dli writes until hblank")
 	err := flgs.Parse(args)
 	if err != nil {
 		return err
@@ -760,6 +764,14 @@ func Launch(endDebugger <-chan bool, g *gui.ChannelsDebugger, args []string) err
 
 	m.console = hardware.Create(&m.ctx, g)
 	m.console.SetPlayers(inputSources)
+
+	// EXPERIMENTAL
+
+	if karateka {
+		m.console.MARIA.Karateka = true
+	}
+
+	//
 
 	defer m.console.End()
 
