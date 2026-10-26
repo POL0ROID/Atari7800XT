@@ -2,7 +2,7 @@
 
 [Video](https://youtu.be/LSctGXLyQ7Q)
 
-The Atari 7800XT initiative uses a fork of [test7800](https://github.com/jetsetilly/test7800) by JetSetIlly, which is licensed under the GNU General Public License v3.0, for prototyping, testing, demonstration, and research purposes. For usage information, see his page.
+The Atari 7800XT research and fantasy console initiative uses a fork of [test7800](https://github.com/jetsetilly/test7800) by JetSetIlly, which is licensed under the GNU General Public License v3.0, for prototyping, testing, demonstration, and research purposes. For usage information, see his page.
 
 Atari 7800XT is currently in Phase 2, so what is present consists of:
 
