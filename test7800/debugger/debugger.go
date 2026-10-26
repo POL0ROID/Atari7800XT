@@ -503,8 +503,19 @@ func Launch(endDebugger <-chan bool, g *gui.ChannelsDebugger, args []string) err
 		players    string
 		useDialog  bool
 		pokeyChip  string
-		// EXPERIMENTAL: adding toggle for Karateka fix
+
+		// EXPERIMENTAL: adding toggle for Karateka/SuperHuey fix via interrupt interception (aliased),
+		// fantasy dual-bus emulation,
+		// and fantasy fast RAM
+
 		karateka   bool
+		superhuey  bool
+		delaybg	   bool
+		dualbus    bool
+		fastram    bool
+
+		//
+
 	)
 
 	specOptions := []string{"AUTO", "NTSC", "PAL"}
@@ -547,8 +558,16 @@ func Launch(endDebugger <-chan bool, g *gui.ChannelsDebugger, args []string) err
 	flgs.StringVar(&players, "players", "", "comma separated list of hardware controllers for up to four players")
 	flgs.BoolVar(&useDialog, "dialog", true, "present user with file dialogue on startup if no file is specified")
 	flgs.StringVar(&pokeyChip, "pokey", "", "force use of optional pokey in cartridge. 'none' will remove an auto added chip")
+
 	// EXPERIMENTAL
-	flgs.BoolVar(&karateka, "karateka", false, "enable karateka fix, which delays background color dli writes until hblank")
+
+	flgs.BoolVar(&karateka, "karateka", false, 	`enable karateka/super huey fix, which delays background color dli writes until hblank`)
+	flgs.BoolVar(&superhuey, "superhuey", false, `enable karateka/super huey fix, which delays background color dli writes until hblank`)
+	flgs.BoolVar(&delaybg, "delaybg", false, `enable karateka/super huey fix, which delays background color dli writes until hblank`)
+	flgs.BoolVar(&dualbus, "dualbus", false, `enable fantasy nes-style dual-bus architecture emulation, which emulates a redesign of the 7800 that communicates with two ROMs and cuts the halt line`)
+	flgs.BoolVar(&fastram, "fastram", false, `enable fantasy fast RAM, which emulates modern RAM access speeds and implements reduced MARIA cycle costs`)
+	//
+
 	err := flgs.Parse(args)
 	if err != nil {
 		return err
@@ -767,8 +786,16 @@ func Launch(endDebugger <-chan bool, g *gui.ChannelsDebugger, args []string) err
 
 	// EXPERIMENTAL
 
-	if karateka {
-		m.console.MARIA.Karateka = true
+	if karateka || superhuey || delaybg {
+		m.console.MARIA.SetDelayBackground(true)
+	}
+
+	if fastram {
+		m.console.MARIA.SetFastRAM(true)
+	}
+
+	if dualbus {
+		m.console.SetDualBus(true)
 	}
 
 	//

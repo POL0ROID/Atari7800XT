@@ -42,6 +42,14 @@ type Memory struct {
 	LastCPUAddress uint16
 	LastCPUData    uint8
 	LastCPUWrite   bool
+
+	// EXPERIMENTAL: 4KB Shadow RAM mirroring $1800-$27FF for isolated MARIA DMA reads and enabling toggle/bool
+
+	ShadowRAM [0x01000]uint8
+	DualBus			   bool
+
+	//
+
 }
 
 type Context interface {
@@ -50,6 +58,23 @@ type Context interface {
 	inptctrl.Context
 	Spec() spec.Spec
 }
+
+// EXPERIMENTAL: thin adapter to allow MARIA to handle bus access differently, like in a dual-bus fantasy
+
+type MariaBus struct {
+	mem *Memory
+}
+
+func (b *MariaBus) Write(address uint16, data uint8) error {
+	// debated whether to put this or "return nil". MARIA does not write but this is more expandable
+	return b.mem.Write(address, data)
+}
+
+func (b *MariaBus) HLT(halt bool) {
+	b.mem.HLT(halt)
+}
+
+//
 
 // AddChips is returned by the Create() function and should be called to
 // finalise the memory creation process
@@ -93,7 +118,7 @@ type Area interface {
 	Access(write bool, address_or_idx uint16, data uint8) (uint8, error)
 }
 
-func Create(ctx Context) (*Memory, AddChips) {
+func Create(ctx Context) (*Memory, *MariaBus, AddChips) {
 	mem := &Memory{
 		ctx:      ctx,
 		INPTCTRL: inptctrl.Create(ctx),
@@ -101,7 +126,12 @@ func Create(ctx Context) (*Memory, AddChips) {
 		RAMRIOT:  ram.Create(ctx, "ramRIOT", 0x0080),
 		External: external.Create(ctx),
 	}
-	return mem, func(maria Area, tia Area, riot Area) {
+
+	busAdapter := &MariaBus{
+		mem: mem,
+	}
+
+	return mem, busAdapter, func(maria Area, tia Area, riot Area) {
 		mem.MARIA = maria
 		mem.TIA = tia
 		mem.RIOT = riot
@@ -361,9 +391,27 @@ func (mem *Memory) MapAddress(address uint16, read bool) (uint16, Area) {
 	return address, mem.External
 }
 
+
+// EXPERIMENTAL: thin adapter to allow MARIA to handle bus access differently, like in a dual-bus fantasy
+
+func (b *MariaBus) Read(address uint16) (uint8, error) {
+	return b.mem.MariaRead(address)
+}
+
+func (mem *Memory) MariaRead(address uint16) (uint8, error) {
+	if mem.DualBus && address >= 0x1800 && address <= 0x27FF {
+		return mem.ShadowRAM[address - 0x1800], nil
+	}
+
+	return mem.Read(address)
+}
+
+//
+
 // Read memory address as viewed by the CPU. This method of reading creates
 // side-effects to the memory system. For reading of memory without side-effects
 // use the package level Read() function
+
 func (mem *Memory) Read(address uint16) (uint8, error) {
 	if mem.addressBus != address {
 		mem.addressBus = address
@@ -406,6 +454,19 @@ func (mem *Memory) Read(address uint16) (uint8, error) {
 func (mem *Memory) Write(address uint16, data uint8) error {
 	// data bus happens early for Write()
 	mem.dataBus = data
+
+	// EXPERIMENTAL: passive sniffing for shadow buffer
+	// (since the emulator by default doesn't touch ShadowRAM, I see no harm in mirroring MARIA writes to it)
+
+	if address >= 0x1800 && address <= 0x27FF { // translating most system memory addresses
+		mem.ShadowRAM[address - 0x1800] = data
+	} else if address >= 0x0040 && address <= 0x00FF { // translating zero page addresses
+		mem.ShadowRAM[(0x2000 + address) - 0x1800] = data
+	} else if address >= 0x0140 && address <= 0x01FF { // translating stack addresses
+		mem.ShadowRAM[(0x2000 + address) - 0x1800] = data
+	}
+
+	//
 
 	if mem.addressBus != address {
 		mem.addressBus = address

@@ -41,6 +41,12 @@ type Console struct {
 
 	// frame limiter
 	limit *limiter
+
+	// EXPERIMENTAL: bool to handle fantasy dual-bus emulation,
+	// and pointer to thin adapter for memory calls from maria,
+	// so memory.go can handle reads sent from maria.go differently
+	dualBus bool
+	mariaBus *memory.MariaBus
 }
 
 type Context interface {
@@ -65,11 +71,12 @@ func Create(ctx Context, g *gui.ChannelsDebugger) *Console {
 
 	// create and attach console components
 	var addChips memory.AddChips
-	con.Mem, addChips = memory.Create(ctx)
+	con.Mem, con.mariaBus, addChips = memory.Create(ctx)
 
 	con.MC = cpu.Create(con.Mem)
 	con.RIOT = riot.Create()
-	con.MARIA = maria.Create(ctx, g, con.Mem, con.MC, con.limit)
+	// con.MARIA = maria.Create(ctx, g, con.Mem, con.MC, con.limit)
+	con.MARIA = maria.Create(ctx, g, con.mariaBus, con.MC, con.limit)
 	con.TIA = tia.Create(ctx, g, con.limit)
 
 	addChips(con.MARIA, con.TIA, con.RIOT)
@@ -83,6 +90,10 @@ func Create(ctx Context, g *gui.ChannelsDebugger) *Console {
 	con.players[1].Reset()
 
 	return con
+}
+
+func (con *Console) SetDualBus(enable bool){
+	con.dualBus = enable
 }
 
 func (con *Console) End() {
@@ -325,7 +336,7 @@ func (con *Console) Step() error {
 		innerTick()
 
 		// consume DMA cycles (but not WSYNC cycles)
-		for con.hlt && con.Mem.INPTCTRL.HaltEnabled() {
+		for !con.dualBus && con.hlt && con.Mem.INPTCTRL.HaltEnabled() {
 			innerTick()
 		}
 
@@ -335,7 +346,7 @@ func (con *Console) Step() error {
 	// swallow all DMA activity. the CPU will be halted during this time so. INPTCTRL only allows
 	// the HALT line to be raised after an initial phase. the HaltEnabled() function tells us the
 	// state of that condition. WSYNC also causes HALT to be enabled
-	for (con.hlt && con.Mem.INPTCTRL.HaltEnabled()) || !con.rdy {
+	for (!con.dualBus && con.hlt && con.Mem.INPTCTRL.HaltEnabled()) || !con.rdy {
 		err := tick()
 		if err != nil {
 			return err

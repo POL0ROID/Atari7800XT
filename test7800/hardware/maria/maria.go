@@ -115,11 +115,14 @@ type Maria struct {
 	// finished
 	dli bool
 
-	// EXPERIMENTAL: Pending register latch for interrupting mid-scanline bg changes,
+	// EXPERIMENTAL: Pending register latch for interrupting mid-scanline MARIA changes,
 	// and bool set by debugger.go representing if the flag is being used
-    pendingBgDli  uint8
-    hasPendingBgDli bool
-    Karateka bool
+
+    pendingBg       uint8
+    hasPendingBg    bool
+    delayBg         bool
+
+    //
 }
 
 type Memory interface {
@@ -148,6 +151,14 @@ func Create(ctx Context, g *gui.ChannelsDebugger, mem Memory, cpu CPU, limit lim
 	return mar
 }
 
+func (mar *Maria) SetDelayBackground(enable bool){
+	mar.delayBg = enable
+}
+
+func (mar *Maria) SetFastRAM(enable bool){
+	mar.dma.fastRAM = enable
+}
+
 func (mar *Maria) Reset(random bool) {
 	mar.Spec = mar.ctx.Spec()
 	if random {
@@ -157,8 +168,10 @@ func (mar *Maria) Reset(random bool) {
 	}
 
 	mar.bg = 0
-	mar.pendingBgDli = 0
-	mar.hasPendingBgDli = false
+	//
+	mar.pendingBg = 0
+	mar.hasPendingBg = false
+	//
 	mar.wsync = false
 	mar.dpph = 0
 	mar.dppl = 0
@@ -325,12 +338,12 @@ func (mar *Maria) Write(idx uint16, data uint8) error {
 	inActiveScanline := mar.Coords.Clk >= spec.ClksHBLANK && mar.mstat == vblankDisable
 	switch idx {
 	case 0x020:
-	    if inActiveScanline && mar.Karateka {
-		        mar.pendingBgDli = data
-				mar.hasPendingBgDli = true
-		} else {
+	    if inActiveScanline && (mar.delayBg) {
+		        mar.pendingBg = data
+				mar.hasPendingBg = true
+		}	else {
 				mar.bg = data
-				mar.hasPendingBgDli = false // probably unnecessary
+				mar.hasPendingBg = false // probably unnecessary
 		}
 	case 0x021:
 		mar.palette[0][0] = data
@@ -520,9 +533,9 @@ func (mar *Maria) Tick(dmaLatch bool) (dma bool, rdy bool, nmi bool) {
 		mar.lineram.newScanline()
 		mar.RecentDL = mar.RecentDL[:0]
 
-		if mar.hasPendingBgDli {
-			mar.bg = mar.pendingBgDli
-			mar.hasPendingBgDli = false
+		if mar.hasPendingBg {
+			mar.bg = mar.pendingBg
+			mar.hasPendingBg = false
 		}
 
 		if mar.Coords.Scanline >= mar.Spec.AbsoluteBottom {

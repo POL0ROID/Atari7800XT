@@ -26,6 +26,7 @@ const (
 	// scanline 85 of the main play screen but the change of displaylist happens on scanline 84.
 	preDMA = (10 * clocks.MariaCycles)
 
+	/** no longer constant
 	// from the table "DMA Timing" in the '7800 Software Guide'
 	dmaStart           = 16
 	dmaStartLastInZone = 24
@@ -34,14 +35,15 @@ const (
 	dmaDirectGfx       = 3
 	dmaIndirectGfx     = 6
 	dmaIndirectWideGfx = 9
+	*/
 
 	// "If holey DMA is enabled and graphics reads would reside in a DMA hole,
 	// only 3 cycles of penalty for the graphic read is incurred, whatever the
 	// sprite width is"
-	dmaHoleyRead = 3
+	// dmaHoleyRead = 3
 
 	// "The end of VBLANK is made up of a DMA startup plus a Long shutdown."
-	dmaEndofVBLANK = dmaStartLastInZone
+	// dmaEndofVBLANK = dmaStartLastInZone
 
 	// the maximum number of cycles available in DMA before the HSYNC
 	//
@@ -59,6 +61,18 @@ const (
 	// also note that the skew also effects the drawing of DMA extent for the DLL zones
 	maxDMA = spec.ClksScanline - preDMA + (5 * clocks.MariaCycles) + 1
 )
+
+var dmaStart           = 16
+var	dmaStartLastInZone = 24
+var	dmaShortDLHeader   = 8
+var	dmaLongDLHeader    = 10
+var	dmaDirectGfx       = 3
+var	dmaIndirectGfx     = 6
+var	dmaIndirectWideGfx = 9
+var dmaHoleyRead       = 3
+var dmaEndofVBLANK     = dmaStartLastInZone
+
+var fastRAM 		   = false
 
 type hlt interface {
 	HLT(bool)
@@ -79,7 +93,24 @@ type dma struct {
 
 	// the number of DMA cycles required to construct the scanline
 	cycles int
+
+	fastRAM bool
 }
+
+// EXPERIMENTAL: these values are not era-appropriate to any prospective MARIA enhancement spec,
+// and the whole FastRAM flag system as it exists now should be understood as a research tool
+// or placeholder for future specs
+func init() {
+	if fastRAM {
+	dmaShortDLHeader   = 0
+	dmaLongDLHeader    = 0
+	dmaDirectGfx       = 0
+	dmaIndirectGfx     = 0
+	dmaIndirectWideGfx = 0
+	dmaHoleyRead       = 0
+	}
+}
+//
 
 func (d *dma) reset() {
 	d.active = false
